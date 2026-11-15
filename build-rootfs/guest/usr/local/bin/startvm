@@ -11,16 +11,19 @@ mount -t sysfs sysfs /sys 2>/dev/null
 mkdir -p /sys/fs/cgroup
 mount -t cgroup2 none /sys/fs/cgroup 2>/dev/null
 
-# binfmt_misc（amd64）
-mkdir -p /proc/sys/fs/binfmt_misc 2>/dev/null
-mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null
-BINFMT=/proc/sys/fs/binfmt_misc
-QX86=""
-for c in /usr/bin/qemu-x86_64-static /usr/bin/qemu-x86_64; do [ -x "$c" ] && QX86="$c" && break; done
-if [ -d "$BINFMT" ] && [ -n "$QX86" ] && [ ! -e "$BINFMT/qemu-x86_64" ]; then
-    printf ':qemu-x86_64:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xfe\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:%s:F\n' "$QX86" > "$BINFMT/register" 2>/dev/null
+# binfmt_misc（amd64）：默认关闭，仅 cmdline 带 podroid.amd64=1 时注册（与 docklet-boot 一致）
+AMD64_ENABLED="$(sed -n 's/.*podroid\.amd64=\([^ ]*\).*/\1/p' /proc/cmdline)"
+if [ "$AMD64_ENABLED" = "1" ]; then
+    mkdir -p /proc/sys/fs/binfmt_misc 2>/dev/null
+    mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null
+    BINFMT=/proc/sys/fs/binfmt_misc
+    QX86=""
+    for c in /usr/bin/qemu-x86_64-static /usr/bin/qemu-x86_64; do [ -x "$c" ] && QX86="$c" && break; done
+    if [ -d "$BINFMT" ] && [ -n "$QX86" ] && [ ! -e "$BINFMT/qemu-x86_64" ]; then
+        printf ':qemu-x86_64:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x3e\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xfe\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:%s:F\n' "$QX86" > "$BINFMT/register" 2>/dev/null
+    fi
+    [ -e "$BINFMT/qemu-x86_64" ] && MARK "binfmt amd64 ready"
 fi
-[ -e "$BINFMT/qemu-x86_64" ] && MARK "binfmt amd64 ready"
 
 # 判断根是否可写：ext4 可写则直接构建可写目录；squashfs 只读则挂 tmpfs
 if touch /var/.wtest 2>/dev/null; then

@@ -160,8 +160,16 @@ class DockerApi(
      * 主要用于 compose 之外的单命令调试。
      */
     fun execCapture(containerId: String, cmd: List<String>): String {
-        val cmdJson = cmd.joinToString(",", "[", "]") { "\"" + it.replace("\\", "\\\\").replace("\"", "\\\"") + "\"" }
-        val body = """{"AttachStdout":true,"AttachStderr":true,"Tty":false,"Cmd":$cmdJson}"""
+        // 用 JSON 构造器序列化 Cmd，避免手拼字符串在命令含引号/反斜杠时破坏 JSON
+        // 或产生注入（见 SECURITY-REVIEW L-5）。
+        val body = kotlinx.serialization.json.buildJsonObject {
+            put("AttachStdout", kotlinx.serialization.json.JsonPrimitive(true))
+            put("AttachStderr", kotlinx.serialization.json.JsonPrimitive(true))
+            put("Tty", kotlinx.serialization.json.JsonPrimitive(false))
+            put("Cmd", kotlinx.serialization.json.buildJsonArray {
+                cmd.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) }
+            })
+        }.toString()
         val created = executeNoBody(post("/containers/$containerId/exec", body))
         val eText = created.body?.string().orEmpty(); created.close()
         val eid = runCatching { json.parseToJsonElement(eText).jsonObject["Id"]?.jsonPrimitive?.content }.getOrNull()
@@ -188,7 +196,9 @@ class DockerApi(
     }
 
     fun renameContainer(id: String, newName: String) {
-        val body = """{"name":"$newName"}"""
+        val body = kotlinx.serialization.json.buildJsonObject {
+            put("name", kotlinx.serialization.json.JsonPrimitive(newName))
+        }.toString()
         executeNoBody(post("/containers/$id/rename", body)).close()
     }
 
@@ -221,7 +231,7 @@ class DockerApi(
     )
 
     fun pullImage(name: String): Flow<PullProgress> = flow {
-        val req = post("/images/create", query = "fromImage=$name")
+        val req = post("/images/create", query = buildPullQuery(name))
         client.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) throw DockerException(resp.code, "HTTP ${resp.code}")
             val reader = resp.body?.charStream() ?: return@flow
@@ -254,12 +264,16 @@ class DockerApi(
     fun removeNetwork(id: String) = executeNoBody(delete("/networks/$id")).close()
 
     fun connectNetwork(networkId: String, containerId: String) {
-        val body = """{"Container":"$containerId"}"""
+        val body = kotlinx.serialization.json.buildJsonObject {
+            put("Container", kotlinx.serialization.json.JsonPrimitive(containerId))
+        }.toString()
         executeNoBody(post("/networks/$networkId/connect", body)).close()
     }
 
     fun disconnectNetwork(networkId: String, containerId: String) {
-        val body = """{"Container":"$containerId"}"""
+        val body = kotlinx.serialization.json.buildJsonObject {
+            put("Container", kotlinx.serialization.json.JsonPrimitive(containerId))
+        }.toString()
         executeNoBody(post("/networks/$networkId/disconnect", body)).close()
     }
 
@@ -391,5 +405,23 @@ class DockerApi(
             val line = br.readLine() ?: break
             block(line)
         }
+    }
+}
+
+/**
+ * 构造 `POST /images/create` 的 query。
+ *
+ * **必须把 tag 拆出来单独传**：podman 的 compat 接口按 `fromImage` + `tag` 两个参数
+ * 拼引用，直接把 `nginx:1-alpine` 整串塞进 `fromImage` 会被当成仓库名的一部分，
+ * 拉下来是一个 `<none>:<none>` 的游离镜像（真机实测，图层都在但没打 tag）。
+ *
+ * 抽成顶层函数是为了能在 JVM 单测里直接验证参数拼装，不用起 VM。
+ */
+internal fun buildPullQuery(name: String): String {
+    val (repo, tag) = com.midsancode.podroid.data.registry.RegistryRef.parse(name)
+    fun enc(s: String) = java.net.URLEncoder.encode(s, "UTF-8")
+    return buildString {
+        append("fromImage=").append(enc(repo))
+        if (tag != null) append("&tag=").append(enc(tag))
     }
 }

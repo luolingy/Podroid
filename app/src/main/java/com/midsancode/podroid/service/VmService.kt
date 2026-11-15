@@ -15,7 +15,8 @@ import com.midsancode.podroid.MainActivity
 import com.midsancode.podroid.R
 import com.midsancode.podroid.data.prefs.Prefs
 import com.midsancode.podroid.i18n.LocaleHelper
-import com.midsancode.podroid.data.vm.QemuRunner
+import com.midsancode.podroid.data.vm.VmBackend
+import com.midsancode.podroid.data.vm.VmBackendFactory
 import com.midsancode.podroid.data.vm.VmManager
 import com.midsancode.podroid.data.vm.VmStatus
 import kotlinx.coroutines.CoroutineScope
@@ -28,7 +29,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
- * 前台服务：持有 WakeLock + 常驻通知，托管 QemuRunner 的生命周期。
+ * 前台服务：持有 WakeLock + 常驻通知，托管 [VmBackend]（默认 QEMU）的生命周期。
  *
  * Android 只允许前台服务长期保活后台进程，所以 QEMU 必须挂在这里。
  *
@@ -40,7 +41,7 @@ import kotlinx.coroutines.launch
 class VmService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private lateinit var runner: QemuRunner
+    private lateinit var runner: VmBackend
     private var wakeLock: PowerManager.WakeLock? = null
 
     /** 用户显式停止时置位，避免自动重启逻辑把刚停的 VM 又拉起来。 */
@@ -58,7 +59,7 @@ class VmService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        runner = QemuRunner(applicationContext, scope)
+        runner = VmBackendFactory.createDefault(applicationContext, scope)
         createChannel()
         observeStatus()
     }
@@ -138,7 +139,7 @@ class VmService : Service() {
             delay(RETRY_DELAY_MS * autoRetries)
             if (!userStopped && Prefs.keepAlive(this@VmService)) {
                 VmManager.onSerialLineDebug("[host] 异常退出，自动重启（第 $autoRetries 次）")
-                // 不调 runner.stop()：进程已经自己退出了，QemuRunner 里的 process 也已置空。
+                // 不调 runner.stop()：进程已经自己退出了，backend 里的 process 也已置空。
                 // 这里再 stop() 会让旧 start() 协程的 waitFor() 返回并二次上报状态，
                 // 触发新一轮 Error → 重试计数被吃掉。
                 runner.start()

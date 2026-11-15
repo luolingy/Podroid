@@ -1,4 +1,4 @@
-# verify.ps1 — Docklet 无人值守验收脚本
+# verify.ps1 — Podroid 无人值守验收脚本
 # DoD: 工程可被命令行验证（结构 + 计数 + 配平 + 关键文件存在）
 $ErrorActionPreference = 'Continue'
 $root = $PSScriptRoot
@@ -9,7 +9,7 @@ function Check($cond, $msg) {
     else { Write-Output "  [FAIL] $msg"; $script:fail++ }
 }
 
-Write-Output "== Docklet 结构验收 =="
+Write-Output "== Podroid 结构验收 =="
 
 # 1. 关键文件存在
 $required = @(
@@ -19,39 +19,41 @@ $required = @(
     'gradle\libs.versions.toml',
     'app\build.gradle.kts',
     'app\src\main\AndroidManifest.xml',
-    'app\src\main\java\com\docklet\DockletApp.kt',
-    'app\src\main\java\com\docklet\MainActivity.kt',
-    'app\src\main\java\com\docklet\data\docker\DockerApi.kt',
-    'app\src\main\java\com\docklet\data\docker\EngineRepository.kt',
-    'app\src\main\java\com\docklet\data\vm\VmManager.kt',
-    'app\src\main\java\com\docklet\data\vm\QemuRunner.kt',
-    'app\src\main\java\com\docklet\data\vm\QmpClient.kt',
-    'app\src\main\java\com\docklet\data\vm\BundleDownloader.kt',
-    'app\src\main\java\com\docklet\service\VmService.kt',
-    'app\src\main\java\com\docklet\ui\DockletRoot.kt',
-    'app\src\main\java\com\docklet\ui\screens\ContainersScreen.kt',
-    'app\src\main\java\com\docklet\ui\screens\ContainerDetailScreen.kt',
-    'app\src\main\java\com\docklet\ui\screens\RunDialog.kt',
+    'app\src\main\java\com\midsancode\podroid\PodroidApp.kt',
+    'app\src\main\java\com\midsancode\podroid\MainActivity.kt',
+    'app\src\main\java\com\midsancode\podroid\data\docker\DockerApi.kt',
+    'app\src\main\java\com\midsancode\podroid\data\docker\EngineRepository.kt',
+    'app\src\main\java\com\midsancode\podroid\data\vm\VmManager.kt',
+    'app\src\main\java\com\midsancode\podroid\data\vm\VmBackend.kt',
+    'app\src\main\java\com\midsancode\podroid\data\vm\QemuBackend.kt',
+    'app\src\main\java\com\midsancode\podroid\data\vm\QmpClient.kt',
+    'app\src\main\java\com\midsancode\podroid\data\vm\BundleDownloader.kt',
+    'app\src\main\java\com\midsancode\podroid\service\VmService.kt',
+    'app\src\main\java\com\midsancode\podroid\ui\PodroidRoot.kt',
+    'app\src\main\java\com\midsancode\podroid\ui\screens\ContainersScreen.kt',
+    'app\src\main\java\com\midsancode\podroid\ui\screens\ContainerDetailScreen.kt',
+    'app\src\main\java\com\midsancode\podroid\ui\screens\RunDialog.kt',
     'build-rootfs\build-rootfs.sh',
     'build-kernel\build-kernel.sh',
     'build-qemu\build-qemu.sh',
-    'build-rootfs\guest\etc\init.d\Docklet-boot'
+    'build-rootfs\guest\etc\init.d\docklet-boot'
 )
 foreach ($r in $required) {
     Check (Test-Path (Join-Path $root $r)) "存在: $r"
 }
 
 # 2. 不应再存在的占位屏
-Check (-not (Test-Path (Join-Path $root 'app\src\main\java\com\docklet\ui\screens\PlaceholderScreens.kt'))) "占位屏已删除"
+Check (-not (Test-Path (Join-Path $root 'app\src\main\java\com\midsancode\podroid\ui\screens\PlaceholderScreens.kt'))) "占位屏已删除"
 
-# 3. Kotlin 括号配平
+# 3. Kotlin 括号配平（先剥掉 // 行注释，避免注释里的 '{' '}' 误判）
 $bad = 0; $count = 0
 Get-ChildItem -Recurse (Join-Path $root 'app\src\main\java') -Filter *.kt | ForEach-Object {
     $count++
-    $c = Get-Content $_.FullName -Raw
+    $c = (Get-Content $_.FullName) -replace '//.*$', ''
+    $c = $c -join "`n"
     $o = ($c.ToCharArray() | Where-Object { $_ -eq '{' }).Count
     $cl = ($c.ToCharArray() | Where-Object { $_ -eq '}' }).Count
-    if ($o -ne $cl) { Write-Output "  [FAIL] 括号不配平: $($_.Name)"; $bad++ }
+    if ($o -ne $cl) { Write-Output "  [FAIL] 括号不配平: $($_.Name)（$o/$cl）"; $bad++ }
 }
 Check ($bad -eq 0) "Kotlin 括号配平（$count 个文件）"
 Check ($count -ge 25) "Kotlin 文件数 >= 25（实际 $count）"
@@ -63,8 +65,8 @@ Check ($mf -match 'WAKE_LOCK') "Manifest: WakeLock 权限"
 Check ($mf -match 'VmService') "Manifest: VmService 声明"
 
 # 5. 串口标记与 BootStage 枚举一致
-$boot = Get-Content (Join-Path $root 'build-rootfs\guest\etc\init.d\Docklet-boot') -Raw
-$vmstatus = Get-Content (Join-Path $root 'app\src\main\java\com\docklet\data\vm\VmStatus.kt') -Raw
+$boot = Get-Content (Join-Path $root 'build-rootfs\guest\etc\init.d\docklet-boot') -Raw
+$vmstatus = Get-Content (Join-Path $root 'app\src\main\java\com\midsancode\podroid\data\vm\VmStatus.kt') -Raw
 foreach ($m in @('kernel up','bootstrap done','network up','engine starting','READY')) {
     $inGuest = $boot -match [regex]::Escape($m)
     $inApp = $vmstatus -match [regex]::Escape($m)

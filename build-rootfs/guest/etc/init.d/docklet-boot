@@ -1,11 +1,15 @@
 #!/sbin/openrc-run
-# Docklet 启动服务（OpenRC）
+# Podroid 启动服务（OpenRC）—— 备用引导路径。
+#
+# ⚠️ 注意：当前主引导流程走 initramfs/init → chroot 执行 boot.sh（不走 OpenRC），
+#    本服务虽被 build-rootfs 装入 /etc/runlevels/default，但**默认不会被启动**。
+#    保留它仅为「切回 OpenRC init」的备用路径，逻辑须与 .work/initramfs/boot.sh 保持一致。
 # 挂载虚拟文件系统、cgroup、ZRAM、网络、启动 Podman system service，
 # 并打印启动阶段标记供 Android 侧串口状态机解析。
 
-description="Docklet VM bootstrap"
+description="Podroid VM bootstrap"
 
-MARK() { echo "Docklet: $1"; }
+MARK() { echo "Podroid: $1"; }
 
 depend() {
     need localmount
@@ -27,32 +31,57 @@ start() {
     mkdir -p /sys/fs/cgroup
     mount -t cgroup2 none /sys/fs/cgroup 2>/dev/null || true
 
-    # binfmt_misc：支持 amd64 (x86_64) 镜像通过 qemu-x86_64 透明执行
-    mkdir -p /proc/sys/fs/binfmt_misc
-    mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
-    BINFMT=/proc/sys/fs/binfmt_misc
-    if [ -d "$BINFMT" ]; then
-        QX86=""
-        for c in /usr/bin/qemu-x86_64-static /usr/bin/qemu-x86_64; do [ -x "$c" ] && QX86="$c" && break; done
-        if [ -n "$QX86" ] && [ ! -e "$BINFMT/qemu-x86_64" ]; then
-            # x86_64 ELF (e_machine=0x3e=62) → qemu-x86_64
-            printf ':qemu-x86_64:M::\\x7fELF\\x02\\x01\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x3e\\x00:\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\x00\\xfe\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xfe\\xff\\xff\\xff:%s:F\n' "$QX86" > "$BINFMT/register" 2>/dev/null || true
+    # binfmt_misc：amd64 (x86_64) 镜像支持。
+    # 默认关闭 —— 仅当内核 cmdline 带 podroid.amd64=1（App 设置里开启"amd64 镜像支持"）时
+    # 才注册 qemu-x86_64 用户态转译。默认只支持 arm64，省掉常驻转译的内存/CPU 开销。
+    AMD64_ENABLED="$(sed -n 's/.*podroid\.amd64=\([^ ]*\).*/\1/p' /proc/cmdline)"
+    if [ "$AMD64_ENABLED" = "1" ]; then
+        mkdir -p /proc/sys/fs/binfmt_misc
+        mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
+        BINFMT=/proc/sys/fs/binfmt_misc
+        if [ -d "$BINFMT" ]; then
+            QX86=""
+            for c in /usr/bin/qemu-x86_64-static /usr/bin/qemu-x86_64; do [ -x "$c" ] && QX86="$c" && break; done
+            if [ -n "$QX86" ] && [ ! -e "$BINFMT/qemu-x86_64" ]; then
+                # x86_64 ELF (e_machine=0x3e=62) → qemu-x86_64
+                printf ':qemu-x86_64:M::\\x7fELF\\x02\\x01\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x3e\\x00:\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\x00\\xfe\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xfe\\xff\\xff\\xff:%s:F\n' "$QX86" > "$BINFMT/register" 2>/dev/null || true
+            fi
+            [ -e "$BINFMT/qemu-x86_64" ] && MARK "binfmt amd64 ready" || MARK "binfmt skip"
         fi
-        [ -e "$BINFMT/qemu-x86_64" ] && MARK "binfmt amd64 ready" || MARK "binfmt skip"
+    else
+        MARK "binfmt amd64 disabled (arm64 only)"
     fi
 
     # squashfs 只读根：整体把 /var 挂 tmpfs（podman 需要大量可写路径）
+    # 内存优化：tmpfs 上限收敛，避免写满时把 guest RAM 挤爆。按 podroid.ram（MB）估算：
+    #   /var 上限 = RAM 的 75%（至少 256M）；小目录（log/run/cache/tmp 等）给 64M 上限。
+    # 注意：tmpfs 按需占用，size= 只是上限；但上限过高在拉镜像/写日志时仍会吃满内存。
+    GUEST_RAM="$(sed -n 's/.*podroid\.ram=\([0-9]*\).*/\1/p' /proc/cmdline)"
+    GUEST_RAM="${GUEST_RAM:-512}"
+    VAR_SIZE=$(( GUEST_RAM * 3 / 4 ))
+    [ "$VAR_SIZE" -lt 256 ] && VAR_SIZE=256
     mkdir -p /var
-    grep -q ' /var ' /proc/mounts || mount -t tmpfs -o size=1536m tmpfs /var 2>/dev/null || true
+    grep -q ' /var ' /proc/mounts || mount -t tmpfs -o size=${VAR_SIZE}m tmpfs /var 2>/dev/null || true
     for d in /var/log /var/lib/containers /var/cache/containers /var/run /var/tmp /tmp /etc/containers /run/containers /run; do
         mkdir -p "$d"
-        grep -q " $d " /proc/mounts || mount -t tmpfs -o size=1g tmpfs "$d" 2>/dev/null || true
+        # 镜像/容器存储（/var/lib/containers）单独给大一点上限（RAM 的 50%），其余小目录 64M。
+        case "$d" in
+            /var/lib/containers) THIS=${VAR_SIZE}m ;;
+            *) THIS=64m ;;
+        esac
+        grep -q " $d " /proc/mounts || mount -t tmpfs -o size=$THIS tmpfs "$d" 2>/dev/null || true
     done
     # podman 需要写 /etc/containers（只读根无法写）：挂 tmpfs 并放默认配置
     grep -q ' /etc/containers ' /proc/mounts || mount -t tmpfs tmpfs /etc/containers 2>/dev/null || true
     mkdir -p /etc/containers/networks /etc/containers/registries.d
     printf 'unqualified-search-registries = ["docker.io"]\n' > /etc/containers/registries.conf 2>/dev/null || true
-    printf '{"default":[{"type":"insecureAcceptAnything"}]}\n' > /etc/containers/policy.json 2>/dev/null || true
+    # 镜像签名策略：默认放行（与主路径一致，见 SECURITY-REVIEW L-2）；podroid.verifyimages=1 时拒绝未签名。
+    VERIFY="$(sed -n 's/.*podroid\.verifyimages=\([^ ]*\).*/\1/p' /proc/cmdline)"
+    if [ "$VERIFY" = "1" ]; then
+        printf '{"default":[{"type":"reject"}]}\n' > /etc/containers/policy.json 2>/dev/null || true
+    else
+        printf '{"default":[{"type":"insecureAcceptAnything"}]}\n' > /etc/containers/policy.json 2>/dev/null || true
+    fi
     printf '[network]\ndefault_network = "podman"\n' > /etc/containers/containers.conf 2>/dev/null || true
     mkdir -p /var/lib/containers/storage /var/run/libpod
     # DNS：/etc/resolv.conf 是指向 /run/docklet/resolv.conf 的软链（rootfs 里预先建好）
@@ -67,9 +96,11 @@ start() {
         mount --bind /run/docklet/resolv.conf /etc/resolv.conf 2>/dev/null || true
     fi
 
-    # ZRAM swap
+    # ZRAM swap：大小按 guest RAM 的 25% 自适应（原来写死 512M，高内存设备上是浪费）。
     if [ -e /dev/zram0 ]; then
-        echo 536870912 > /sys/block/zram0/disksize 2>/dev/null && \
+        ZRAM_BYTES=$(( GUEST_RAM * 1024 * 1024 / 4 ))
+        [ "$ZRAM_BYTES" -lt $((64 * 1024 * 1024)) ] && ZRAM_BYTES=$((64 * 1024 * 1024))
+        echo "$ZRAM_BYTES" > /sys/block/zram0/disksize 2>/dev/null && \
         mkswap /dev/zram0 >/dev/null 2>&1 && swapon /dev/zram0 2>/dev/null || true
     fi
 
@@ -84,7 +115,7 @@ start() {
     # 容器引擎：Podman system service 暴露 Docker 兼容 API 到 TCP 2375
     MARK "engine starting"
     export HOME=/root
-    (podman system service --time=0 tcp://0.0.0.0:2375 >/var/log/podman.log 2>&1 &) || true
+    (podman system service --time=300 tcp://0.0.0.0:2375 >/var/log/podman.log 2>&1 &) || true
     i=0
     while [ $i -lt 40 ]; do
         if (echo > /dev/tcp/127.0.0.1/2375) 2>/dev/null; then break; fi

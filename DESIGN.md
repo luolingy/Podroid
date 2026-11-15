@@ -121,6 +121,8 @@ Android 是 Linux 内核，但和你想象的 Linux 不一样，这是设计的�
 | **AVF / pKVM（硬件虚拟化）** | Android Virtualization Framework，接近原生速度 | 支持的 Pixel 设备（出厂 pKVM），需一次性 adb 授权 |
 
 > 设计上把两者抽象成同一个 `VmBackend` 接口，guest 镜像完全一样，只有 host 侧不同。这样 QEMU 保底可用，AVF 在支持设备上加速。
+>
+> **实现状态（当前）**：`data/vm/VmBackend.kt` 已定义接口（`start/stop/writeConsole/isRunning/kind`）+ `VmBackendKind` 枚举；`QemuBackend` 为 QEMU 实现；`VmBackendFactory` 负责按类型创建并处理回退（AVF 尚未实现，暂回退 QEMU）。上层 `VmService` 只依赖 `VmBackend`，将来接 AVF 无需改上层。
 
 ### 4.2 文件系统
 

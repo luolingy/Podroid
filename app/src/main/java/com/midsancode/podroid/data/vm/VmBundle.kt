@@ -10,7 +10,7 @@ import java.io.File
  *
  * 解析顺序：按需下载目录 filesDir/vm-bundle/<version>/
  *
- * 启动形态（见 QemuRunner.buildCommand）：
+ * 启动形态（见 QemuBackend.buildCommand）：
  *   -kernel Image -initrd initrd.cpio.gz -append "rdinit=/init ..."
  *   /dev/vda = rootfs（squashfs 只读，或 ext4 可写）
  *   /dev/vdb = data.ext4（持久化 /var/lib/containers，首次启动由 initramfs 内 mke2fs 格式化）
@@ -25,8 +25,10 @@ data class VmBundle(
     val dnsServers: String,
     /** docker.io 镜像站（逗号分隔）；空串 = 用 boot.sh 内置默认。 */
     val mirrors: String = "",
-    /** 容器默认网络模式：host / bridge。 */
+    /** 容器默认网络模式：host / bridge。默认 host —— 内置内核未开 bridge 支持，选 bridge 容器无法启动。 */
     val networkMode: String = "host",
+    /** 是否启用 amd64 镜像支持（决定内核 cmdline 的 podroid.amd64）。默认关闭，仅支持 arm64。 */
+    val amd64Support: Boolean = false,
 ) {
     val qmpSocket: File get() = dataImage.parentFile!!.resolve("qmp.sock")
     val hostdSocket: File get() = dataImage.parentFile!!.resolve("hostd.sock")
@@ -40,7 +42,8 @@ data class VmBundle(
     companion object {
         const val BUNDLE_VERSION = "0.1.0"
         private const val TAG = "VmBundle"
-        private const val DEFAULT_RAM_MB = 1024
+        // 默认 512MB：轻量容器够用，常驻内存比 1024 省一半。用户可在设置里调 256–4096。
+        private const val DEFAULT_RAM_MB = 512
 
         /**
          * 持久盘默认 4 GB。稀疏文件，未写入前几乎不占空间；
@@ -66,6 +69,7 @@ data class VmBundle(
             val dns = s?.dnsServers ?: "223.5.5.5,119.29.29.29"
             val mirrors = s?.mirrors ?: ""
             val networkMode = s?.networkMode ?: "host"
+            val amd64Support = s?.amd64Support ?: false
 
             val dir = bundleDir(context)
             if (!dir.exists()) dir.mkdirs()
@@ -95,6 +99,7 @@ data class VmBundle(
                 dnsServers = dns,
                 mirrors = mirrors,
                 networkMode = networkMode,
+                amd64Support = amd64Support,
             )
         }
 

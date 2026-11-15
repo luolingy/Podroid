@@ -1,5 +1,65 @@
 # 更新日志
 
+## Unreleased
+
+### 新功能
+
+- **App 实际资源占用统计**：主页新增「资源占用」卡片，每 2 秒采样一次 `/proc`，展示 App 进程常驻、QEMU 进程常驻、App+QEMU 合计、guest 配置内存，以及设备整体内存使用条（数据源 `data/diag/AppStats.kt`）。
+- **amd64 镜像支持改为可选开关**：设置 → 启动 → 「amd64 (x86_64) 镜像支持」，默认关闭。关闭时 guest 不注册 binfmt/qemu-x86_64，省下常驻转译开销；开启后下次启动 VM 生效。
+- **VM 后端抽象 `VmBackend`**：抽出 `data/vm/VmBackend.kt` 接口 + `VmBackendKind` 枚举，原 `QemuRunner` 迁为 `QemuBackend` 实现；新增 `VmBackendFactory`（AVF 预留，暂回退 QEMU）。行为不变，为后续接入 AVF/pKVM 硬件加速铺路。
+
+### 内存优化
+- **默认 guest RAM 1024MB → 512MB**（可在设置里调 256–4096）。
+- **QEMU 增加 `virtio-balloon-pci`**：guest 可把空闲内存归还宿主，降低常驻占用。
+- **tmpfs 上限按 RAM 自适应**（生效于真正的 `initramfs/init`）：`/var` 由固定 1536MB 改为 RAM 的 75%（至少 256MB）；容器存储回退 tmpfs 由 1024MB 改为 RAM 的 50%（至少 256MB）。
+- **镜像/容器存储落 ext4 磁盘**：`/var/lib/containers` 挂 `/dev/vdb`（`data.ext4`），不占 guest 内存（仅 ext4 挂载失败时才回退 tmpfs）。
+- **QEMU 参数调优**：`-cpu max` → `cortex-a76`；`-accel tcg,thread=multi,tb-size=512`（RSS 再降 ~42MB）。
+- **App 轮询优化**：主轮询 5s→15s 且只刷快列表，慢路由 `/info`、`/system/df` 降为 60s；实时性交给 `/events`。真机实测 API `/version` 延迟从"打满 30s+超时"降到 8–15s。详见 `DEEP-OPTIMIZATION-RESEARCH.md` §7。
+- **amd64 binfmt 默认关闭**（生效于 `boot.sh`）：仅 `podroid.amd64=1` 时注册 qemu-x86_64，默认跳过省内存/CPU。
+- 说明：主引导路径为 `initramfs/init → boot.sh`；`build-rootfs/guest/etc/init.d/docklet-boot`（OpenRC）为备用/未启用路径，其内容仅作一致性维护。
+
+### 安全加固（详见 SECURITY-REVIEW.md）
+
+- hostfwd 绑定 `127.0.0.1`（不再暴露到全网卡）；默认网络模式改 `bridge`。
+- 底座/QEMU 下载增加 SHA-256 完整性校验（fail-closed）。
+- Tar 解压修复路径穿越（Zip-Slip）。
+- 收敛明文流量（networkSecurityConfig）、消除 DockerApi 内 JSON 手拼、签名口令支持环境变量。
+
+### 新功能：搜索镜像 + 选择 tag
+
+镜像页原来的「拉取镜像」只是一个输入框，得自己拼 `nginx:1.25`。现在换成三步：
+
+1. **搜索** —— 输入关键词搜 Docker Hub，结果带官方徽章、star 数和 pull 数。
+2. **选版本** —— 点进去列出该仓库的全部 tag（`latest` 置顶并标「最新」），带过滤框。
+   nginx 有 1381 个 tag，全渲染会卡死弹窗，所以只渲染前 80 个并提示用过滤缩小。
+3. **拉取** —— 选中 tag 直接拉，弹窗里显示实时进度与镜像引用。
+
+两条网络路径分开兜底：
+
+- **tag 列表**走镜像站的 registry v2 接口（`/v2/{repo}/tags/list`），国内可用。
+  各站行为不一致，需逐个试并跳过空结果 —— `docker.m.daocloud.io` 拿 token 后返回
+  `{"name":"disable-list-tags","tags":[]}`（主动禁用），`docker.1panel.live` 正常，
+  `hub.rat.dev` 回 302。判据是"非空 tags"。
+- **搜索**只能打 `hub.docker.com`，国内基本不可达。失败时回退到内置的 75 个常用镜像
+  并明确提示"Docker Hub 在这里连不上"，而不是假装没搜到。任何时候都可以直接输入
+  完整镜像名跳过搜索。
+
+### 修复（伴随上述功能发现）
+
+- **拉取带 tag 的镜像会得到 `<none>:<none>`**：`/images/create` 的 `fromImage` 参数被
+  整串塞了 `nginx:1-alpine`，podman 把它当成仓库名的一部分，图层下完了却没打 tag。
+  现在按 Docker API 规范拆成 `fromImage` + `tag` 两个参数并做 URL 转义。
+- **第三方 registry 的 host 被剥掉**：`ghcr.io/foo/bar` 之前被归一化成 `foo/bar`，
+  然后去 docker.io 拉一个同名但不相干的镜像 —— 静默拉错比报错糟得多。现在只剥
+  Docker Hub 的别名（`docker.io` / `index.docker.io` / `registry-1.docker.io`），
+  第三方 registry 原样保留，tag 列表也直连该 host。
+
+### 其他
+
+- 镜像页按钮文案「拉取镜像」→「搜索镜像」，空状态提示同步更新。
+- 新增 16 条中英文案，`values/` 与 `values-zh/` 均为 345 条，完全对齐。
+- 新增 21 条单测（镜像引用解析、tag 排序、拉取 query 拼装、内置库过滤）。
+
 ## v0.6.0 — 2026-11-14
 
 **项目更名为 Podroid**（原 Docklet）。

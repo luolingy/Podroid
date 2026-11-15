@@ -9,12 +9,16 @@ plugins {
 
 // release 签名：口令放在 keystore.properties（已 gitignore），缺失时回退 debug 签名，
 // 保证 clone 下来直接 assembleRelease 也能出包（只是不可上架）。
+// 安全：优先读环境变量（CI/本机均可注入），避免明文口令落盘；见 SECURITY-REVIEW L-6。
 val keystorePropsFile = rootProject.file("keystore.properties")
 val keystoreProps = Properties().apply {
     if (keystorePropsFile.exists()) {
         keystorePropsFile.inputStream().use { load(it) }
     }
 }
+fun ksProp(key: String): String? =
+    System.getenv(key) ?: keystoreProps.getProperty(key)
+val ksStoreFile = ksProp("PODROID_STORE_FILE") ?: keystoreProps.getProperty("storeFile")
 
 android {
     namespace = "com.midsancode.podroid"
@@ -37,11 +41,11 @@ android {
 
     signingConfigs {
         create("release") {
-            if (keystorePropsFile.exists()) {
-                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
-                storePassword = keystoreProps.getProperty("storePassword")
-                keyAlias = keystoreProps.getProperty("keyAlias")
-                keyPassword = keystoreProps.getProperty("keyPassword")
+            if (keystorePropsFile.exists() || ksStoreFile != null) {
+                storeFile = rootProject.file(ksStoreFile)
+                storePassword = ksProp("PODROID_STORE_PASSWORD")
+                keyAlias = ksProp("PODROID_KEY_ALIAS")
+                keyPassword = ksProp("PODROID_KEY_PASSWORD")
             }
         }
     }

@@ -44,7 +44,7 @@ object VmManager {
      */
     private val i18n: Context? get() = appContext?.let { LocaleHelper.wrap(it) }
 
-    /** QemuRunner 注册的串口写入器（App 生命周期内只有一个 runner）。 */
+    /** 当前 VM 后端（QemuBackend 等）注册的串口写入器（App 生命周期内只有一个 backend）。 */
     @Volatile
     internal var consoleWriter: ((String) -> Unit)? = null
 
@@ -91,6 +91,8 @@ object VmManager {
      */
     internal fun onSerialLine(line: String) {
         appendSerial(line)
+        // 串口日志同步打一条 logcat（tag=PodroidSerial），便于 adb 抓取启动阶段时间戳（boot.sh 的 TS[...]）
+        Log.i("PodroidSerial", line)
         val stage = BootStage.match(line)
         when {
             stage == BootStage.READY -> {

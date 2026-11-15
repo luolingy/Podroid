@@ -41,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -53,6 +54,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.midsancode.podroid.R
+import com.midsancode.podroid.data.diag.AppStats
+import com.midsancode.podroid.data.diag.ResourceSnapshot
 import com.midsancode.podroid.data.docker.EngineRepository
 import com.midsancode.podroid.data.vm.QemuBinaries
 import com.midsancode.podroid.data.vm.VmBundle
@@ -96,6 +99,17 @@ fun HomeScreen(
     val running = status !is VmStatus.Stopped
     var logExpanded by remember { mutableStateOf(false) }
     val logScroll = rememberScrollState()
+
+    // 实际资源占用：每 2 秒采一次 /proc 快照（App 自身 + QEMU + 设备内存）。
+    var resSnap by remember { mutableStateOf<ResourceSnapshot?>(null) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            resSnap = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                AppStats.snapshot(guestRamConfiguredMb = settings.ramMb)
+            }
+            delay(2_000)
+        }
+    }
 
     // 日志跟随到底部
     LaunchedEffect(serial.size, logExpanded) {
@@ -225,6 +239,9 @@ fun HomeScreen(
                 }
             }
         }
+
+        // ---- 实际资源占用 ----
+        ResourceCard(resSnap)
 
         // ---- 启动日志 ----
         Card(Modifier.fillMaxWidth()) {
@@ -374,6 +391,56 @@ private fun heroSubtitle(status: VmStatus, engineOk: Boolean, running: Boolean, 
             else stringResource(R.string.hero_stopped)
         is VmStatus.Error -> stringResource(R.string.hero_error)
     }
+
+/** 实际资源占用卡片：App 自身 + QEMU + 设备内存，数据来自 /proc 快照。 */
+@Composable
+private fun ResourceCard(snap: ResourceSnapshot?) {
+    SectionCard(
+        title = stringResource(R.string.res_title),
+        icon = Icons.Rounded.Storage,
+        subtitle = stringResource(R.string.res_sub),
+    ) {
+        if (snap == null) {
+            Text(
+                "—",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return@SectionCard
+        }
+        KeyValueRow(stringResource(R.string.res_app_rss), snap.appRssBytes?.let { formatSize(it) } ?: "—")
+        KeyValueRow(
+            stringResource(R.string.res_qemu_rss),
+            snap.qemuRssBytes?.let { formatSize(it) } ?: stringResource(R.string.res_not_running),
+        )
+        snap.guestRamConfiguredMb?.let {
+            KeyValueRow(stringResource(R.string.res_guest_ram_cfg), "$it MB")
+        }
+        snap.totalOwnRssBytes?.let {
+            KeyValueRow(stringResource(R.string.res_total_own), formatSize(it), mono = true)
+        }
+
+        // 设备内存使用条（Avail / Total）
+        if (snap.deviceTotalBytes != null && snap.deviceAvailBytes != null && snap.deviceTotalBytes > 0) {
+            val used = snap.deviceTotalBytes - snap.deviceAvailBytes
+            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth()) {
+                Text(
+                    stringResource(R.string.res_device_mem),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "${formatSize(used)} / ${formatSize(snap.deviceTotalBytes)}",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            ThinUsageBar((used.toFloat() / snap.deviceTotalBytes.toFloat()).coerceIn(0f, 1f))
+        }
+    }
+}
 
 @Composable
 private fun StatTile(

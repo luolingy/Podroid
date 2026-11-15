@@ -88,6 +88,14 @@
     <string name="home_prune">Prune unused data</string>
     <string name="home_pruned">Freed %1$s</string>
     <string name="home_boot_log">Boot log</string>
+    <string name="res_title">Resource usage</string>
+    <string name="res_sub">Live memory from /proc, refreshed every 2s</string>
+    <string name="res_app_rss">App process RSS</string>
+    <string name="res_qemu_rss">QEMU process RSS</string>
+    <string name="res_guest_ram_cfg">Guest RAM (configured)</string>
+    <string name="res_total_own">App + QEMU total</string>
+    <string name="res_device_mem">Device memory</string>
+    <string name="res_not_running">VM not running</string>
     <string name="home_no_output">(no output yet)</string>
     <string name="hero_ready_engine">Engine ready · Docker API 127.0.0.1:%1$d</string>
     <string name="hero_ready_connecting">VM ready, connecting to engine…</string>
@@ -125,10 +133,25 @@
     <string name="images_engine_off_title">Engine not connected</string>
     <string name="images_engine_off_msg">Waiting for the Podman service to listen…</string>
     <string name="images_empty_title">No local images</string>
-    <string name="images_empty_msg">Tap “Pull image” and try nginx:alpine — mirrors are preconfigured.</string>
+    <string name="images_empty_msg">Tap “Find image” and search for nginx — mirrors are preconfigured.</string>
     <string name="images_pull_title">Pull image</string>
     <string name="images_pull_label">Image name</string>
     <string name="images_pull_action">Pull</string>
+    <string name="images_search_title">Find image</string>
+    <string name="images_search_hint">Search Docker Hub, or type a full name like nginx:1.25</string>
+    <string name="images_search_label">Search</string>
+    <string name="images_search_action">Search</string>
+    <string name="images_search_offline">Docker Hub is unreachable here — showing popular images instead. You can still type any full image name.</string>
+    <string name="images_search_empty">Nothing matched. Try a different keyword, or type the full name.</string>
+    <string name="images_pull_direct">Pull now</string>
+    <string name="images_tag_title">Pick a tag</string>
+    <string name="images_tag_loading">Loading tags…</string>
+    <string name="images_tag_failed">Could not load tags: %1$s</string>
+    <string name="images_tag_empty">This repository exposes no tags.</string>
+    <string name="images_tag_filter">Filter tags</string>
+    <string name="images_tag_latest">latest</string>
+    <string name="images_tag_more">Showing first %1$d of %2$d — narrow it down with the filter above.</string>
+    <string name="images_official">official</string>
 
     <!-- 资源 -->
     <string name="resources_title">Resources</string>
@@ -306,6 +329,8 @@
     <string name="sec_startup">Startup</string>
     <string name="setting_autostart">Start VM on boot</string>
     <string name="setting_autostart_desc">Brings the engine up after reboot so other apps can reach 2375</string>
+    <string name="setting_amd64">amd64 (x86_64) image support</string>
+    <string name="setting_amd64_desc">Off by default — arm64 only. Turn on to run amd64 images via qemu-x86_64 (extra memory/CPU; takes effect on next VM start)</string>
 
     <string name="sec_appearance">Appearance</string>
     <string name="setting_mode">Light / dark</string>

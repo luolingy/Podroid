@@ -108,6 +108,7 @@ fun PodroidRoot(afterCrash: Boolean = false) {
     var detailId by rememberSaveable { mutableStateOf<String?>(null) }
     val repo: EngineRepository = koinInject()
     val settingsRepo: com.midsancode.podroid.data.settings.SettingsRepository = koinInject()
+    val registry: com.midsancode.podroid.data.registry.RegistryClient = koinInject()
     val snackbar = remember { SnackbarHostState() }
     val lastError by repo.lastError.collectAsState()
     val context = LocalContext.current
@@ -183,7 +184,7 @@ fun PodroidRoot(afterCrash: Boolean = false) {
             else -> when (tab) {
                 Tab.Home -> HomeScreen(repo, m, onGoSettings = { tab = Tab.Settings })
                 Tab.Containers -> ContainersScreen(repo, m, onOpenDetail = { detailId = it })
-                Tab.Images -> ImagesScreen(repo, m)
+                Tab.Images -> ImagesScreen(repo, registry, m)
                 Tab.Resources -> ResourcesScreen(repo, m)
                 Tab.Terminal -> TerminalScreen(m)
                 Tab.Settings -> SettingsScreen(settingsRepo, m)

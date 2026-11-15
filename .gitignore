@@ -48,3 +48,9 @@ app/src/main/assets/initrd.img
 
 .work/*.xml
 dist/
+
+# 外部工具产出的技能库，与本项目无关
+.dsh/
+.work/*.log
+.work/*.json
+.work/s.json

@@ -507,6 +507,17 @@ fun SettingsScreen(settingsRepo: SettingsRepository, modifier: Modifier = Modifi
                         onCheckedChange = { b -> cs.launch { settingsRepo.setAutoStart(b) } },
                     )
                 }
+
+                Spacer(Modifier.height(4.dp))
+                SettingRow(
+                    title = stringResource(R.string.setting_amd64),
+                    description = stringResource(R.string.setting_amd64_desc),
+                ) {
+                    Switch(
+                        checked = settings.amd64Support,
+                        onCheckedChange = { b -> cs.launch { settingsRepo.setAmd64Support(b) } },
+                    )
+                }
             }
 
             // ---- 后台保活 ----
@@ -725,7 +736,7 @@ fun SettingsScreen(settingsRepo: SettingsRepository, modifier: Modifier = Modifi
                 )
                 KeyValueRow(
                     stringResource(R.string.about_arch),
-                    "arm64 · amd64 (binfmt + qemu-x86_64)",
+                    if (settings.amd64Support) "arm64 · amd64 (binfmt + qemu-x86_64)" else "arm64 (amd64 可选)",
                     stacked = true,
                 )
             }

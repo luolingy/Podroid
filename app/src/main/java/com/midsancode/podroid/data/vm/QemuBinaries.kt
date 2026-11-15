@@ -80,6 +80,9 @@ object QemuBinaries {
         val tmp = File(context.cacheDir, BUNDLE_NAME)
         var got = false
         var lastErr: String? = null
+        // 下载前一次性获取完整性清单；拿不到也继续，但下载后会被 verify 拒绝（fail-closed）。
+        val sums = Checksums.fetchSums()
+        if (sums.isEmpty()) Log.w("QemuBinaries", "无法获取 SHA256SUMS：qemu-bundle 将无法通过完整性校验")
         for (url in Mirrors.candidates(BUNDLE_NAME)) {
             try {
                 Log.i("QemuBinaries", "尝试: $url")
@@ -101,9 +104,11 @@ object QemuBinaries {
                 }
                 conn.disconnect()
                 if (total > 0 && tmp.length() != total) throw java.io.IOException("大小不符")
+                // 完整性校验：不通过则删除并按失败处理，换下一个镜像源。
+                Checksums.verify(tmp, BUNDLE_NAME, sums)
                 got = true; break
             } catch (e: Exception) {
-                Log.w("QemuBinaries", "$url 失败: ${e.message}")
+                Log.w("QemuBinaries", "$url 失败/校验未过: ${e.message}")
                 lastErr = e.message
                 tmp.delete()
             }

@@ -10,23 +10,28 @@ import java.io.File
 import java.io.InputStream
 
 /**
- * 负责实际拉起并管理 QEMU 进程。
+ * QEMU（TCG 软件模拟）后端实现。
  *
  * 均衡档：qemu-system-aarch64（TCG）+ virt 机器。
  * 串口复用 stdio：stdout→App（状态机解析），stdin←App（终端输入）。
+ *
+ * 状态上报统一走 [VmManager]（onSerialLine / onProcessLaunched / onProcessExited /
+ * onStartFailure），与 VmBackend 契约一致。
  */
-class QemuRunner(
+class QemuBackend(
     private val context: Context,
     private val scope: CoroutineScope,
-) {
+) : VmBackend {
+
+    override val kind: String = "qemu"
 
     private var process: Process? = null
     private var consoleJob: Job? = null
 
-    val isRunning: Boolean get() = process?.isAlive == true
+    override val isRunning: Boolean get() = process?.isAlive == true
 
     /** 终端/脚本向 guest 串口写一行（不含换行，自动补 \n）。 */
-    fun writeConsole(text: String) {
+    override fun writeConsole(text: String) {
         val p = process ?: return
         if (!p.isAlive) return
         scope.launch(Dispatchers.IO) {
@@ -37,7 +42,7 @@ class QemuRunner(
         }
     }
 
-    fun start() {
+    override fun start() {
         if (isRunning) {
             VmManager.onStartFailure("VM 已在运行")
             return
@@ -87,7 +92,7 @@ class QemuRunner(
         }
     }
 
-    fun stop() {
+    override fun stop() {
         consoleJob?.cancel()
         VmManager.consoleWriter = null
         val p = process
@@ -126,11 +131,19 @@ class QemuRunner(
         val extraCmdline = buildString {
             if (b.mirrors.isNotBlank()) append(" podroid.mirror=").append(b.mirrors.trim())
             if (b.networkMode.isNotBlank()) append(" podroid.network=").append(b.networkMode.trim())
+            // amd64 镜像支持：默认关闭，仅当用户显式开启时传 1，guest 才会注册 binfmt+qemu-x86_64。
+            if (b.amd64Support) append(" podroid.amd64=1")
         }
         addAll(
             listOf(
                 "-machine", "virt",
-                "-cpu", "max",
+                // 性能：不用 -cpu max（暴露全部特性→TB 更大、翻译面更广）。改用与设备大核
+                // （Cortex-A76）匹配的型号，TB 更小更可预测，降低 TCG 翻译开销。
+                // 若遇兼容性问题可回退为 "max"。见 DEEP-OPTIMIZATION-RESEARCH 阶段1。
+                "-cpu", "cortex-a76",
+                // 显式多线程 TCG（MTTCG），并把翻译缓存(tb-size)限制为 512MB：
+                // 降低内存占用（默认视物理内存可能很大），命中足够时无损。
+                "-accel", "tcg,thread=multi,tb-size=512",
                 "-smp", "2",
                 "-m", "${b.ramMb}",
                 "-nographic",                       // 串口 = stdio（双向）
@@ -146,8 +159,13 @@ class QemuRunner(
                 // 注意：这里不要加 dns=…。加了会覆盖 SLIRP 的转发目标，实测会导致
                 // guest DNS 直接超时（1.1.1.1 在国内常不可达）。不加则由 SLIRP 转发到
                 // 手机自身的 DNS，guest 内 resolv.conf 首行写 10.0.2.3 即可。
-                "-netdev", "user,id=net0,hostfwd=tcp::${b.hostPort}-:2375",
+                // 安全：hostfwd 必须绑定 127.0.0.1。省略 hostaddr 时 QEMU 会监听
+                // 0.0.0.0（所有网卡），把无认证的 podman API 暴露到局域网 → 同网段
+                // 任意设备可拿到 VM 内 root 级控制面。见 SECURITY-REVIEW H-1。
+                "-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:${b.hostPort}-:2375",
                 "-device", "virtio-net-pci,netdev=net0",
+                // virtio-balloon：guest 可把空闲内存归还宿主，降低常驻占用（配合默认 512MB RAM）。
+                "-device", "virtio-balloon-pci",
                 "-qmp", "unix:${b.qmpSocket.absolutePath},server=on,wait=off",
                 "-chardev", "socket,id=hostd,path=${b.hostdSocket.absolutePath},server=on,wait=off",
                 "-device", "virtio-serial-pci",
@@ -172,6 +190,6 @@ class QemuRunner(
     }
 
     companion object {
-        private const val TAG = "QemuRunner"
+        private const val TAG = "QemuBackend"
     }
 }

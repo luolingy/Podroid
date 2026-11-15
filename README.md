@@ -1,12 +1,12 @@
 # Podroid
 
-在 Android 上跑容器。原生 App + QEMU 虚拟机 + Podman，arm64 与 amd64 镜像都能跑，通过标准 Docker REST API（`127.0.0.1:2375`）对外暴露。
+在 Android 上跑容器。原生 App + QEMU 虚拟机 + Podman，默认跑 arm64 镜像，通过标准 Docker REST API（`127.0.0.1:2375`）对外暴露。amd64 (x86_64) 镜像为可选能力，需在设置里开启。
 
 > 完整设计与取舍见 [DESIGN.md](DESIGN.md)，版本变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 当前版本：v0.6.0
 
-- **容器运行时**：podman 5.2.5 + crun 1.17，跑在 Alpine 3.20 guest 里；arm64 原生、amd64 经 binfmt + `qemu-x86_64` 透明转译。
+- **容器运行时**：podman 5.2.5 + crun 1.17，跑在 Alpine 3.20 guest 里；**默认仅 arm64**。amd64 (x86_64) 镜像为可选：在设置里开启「amd64 镜像支持」后，guest 才注册 binfmt + `qemu-x86_64` 透明转译（额外占用内存/CPU，默认关闭）。
 - **Docker REST 全通**：`/version`、`/containers`、`/images`、`/volumes`、`/events`、`/exec`、`/build` 均可从宿主直连。
 - **界面**：主页 / 容器 / 镜像 / 资源 / 终端 / 设置六页；容器详情有日志流、资源占用、inspect 摘要、容器内执行。
 - **多语言**：简体中文 / English，切换即时生效。

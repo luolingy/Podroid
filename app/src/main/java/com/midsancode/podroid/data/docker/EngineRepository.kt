@@ -89,11 +89,20 @@ class EngineRepository(
             }
         }
 
-        // 主轮询：就绪时每 5s 刷新全部列表
+        // 主轮询（低频兜底）：
+        //  - 实时性由下方 /events 事件流驱动（容器/镜像增删即时刷新），轮询只做兜底防漏。
+        //  - 快列表 15s 一次；慢路由（/info、/system/df）只在就绪时和每 60s 刷新一次，
+        //    避免每 5s 打 /info 把 podman 单线程服务占满（真机实测会让其它 API 打满 30s 超时）。
         scope.launch {
+            var tick = 0
             while (isActive) {
-                if (_engineAvailable.value) refreshAll()
-                delay(5_000)
+                if (_engineAvailable.value) {
+                    refreshLists()
+                    // 每 4 个 tick（约 60s）刷一次慢路由
+                    if (tick % 4 == 0) refreshSystem()
+                }
+                tick++
+                delay(15_000)
             }
         }
 
@@ -130,8 +139,14 @@ class EngineRepository(
         }
     }
 
+    /** 仅刷新"快"列表（containers/images/networks/volumes）。不含 /info、/system/df 慢路由。 */
+    fun refreshLists() {
+        refreshContainers(); refreshImages(); refreshNetworks(); refreshVolumes()
+    }
+
+    /** 全量刷新（含慢路由）。仅用于就绪首次 / 低频兜底，避免频繁打 /info 抢占引擎。 */
     fun refreshAll() {
-        refreshContainers(); refreshImages(); refreshNetworks(); refreshVolumes(); refreshSystem()
+        refreshLists(); refreshSystem()
     }
 
     // ---- 各列表刷新 ----

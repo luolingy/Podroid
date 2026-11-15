@@ -84,6 +84,14 @@
     <string name="home_prune">清理未使用数据</string>
     <string name="home_pruned">已释放 %1$s</string>
     <string name="home_boot_log">启动日志</string>
+    <string name="res_title">资源占用</string>
+    <string name="res_sub">实时内存（读 /proc，每 2 秒刷新）</string>
+    <string name="res_app_rss">App 进程常驻</string>
+    <string name="res_qemu_rss">QEMU 进程常驻</string>
+    <string name="res_guest_ram_cfg">guest 配置内存</string>
+    <string name="res_total_own">App + QEMU 合计</string>
+    <string name="res_device_mem">设备内存</string>
+    <string name="res_not_running">VM 未运行</string>
     <string name="home_no_output">（尚无输出）</string>
     <string name="hero_ready_engine">容器引擎已就绪 · Docker API 127.0.0.1:%1$d</string>
     <string name="hero_ready_connecting">VM 就绪，正在连接引擎…</string>
@@ -121,10 +129,25 @@
     <string name="images_engine_off_title">引擎未连接</string>
     <string name="images_engine_off_msg">等待 Podman 服务监听…</string>
     <string name="images_empty_title">本地没有镜像</string>
-    <string name="images_empty_msg">点「拉取镜像」输入 nginx:alpine 试试，默认走国内镜像站。</string>
+    <string name="images_empty_msg">点「搜索镜像」搜一下 nginx 试试，默认走国内镜像站。</string>
     <string name="images_pull_title">拉取镜像</string>
     <string name="images_pull_label">镜像名</string>
     <string name="images_pull_action">拉取</string>
+    <string name="images_search_title">搜索镜像</string>
+    <string name="images_search_hint">搜索 Docker Hub，或直接输入完整名字，如 nginx:1.25</string>
+    <string name="images_search_label">搜索</string>
+    <string name="images_search_action">搜索</string>
+    <string name="images_search_offline">Docker Hub 在这里连不上，已换成常用镜像列表。也可以直接输入任意完整镜像名。</string>
+    <string name="images_search_empty">没有匹配的镜像。换个关键词，或直接输入完整名字。</string>
+    <string name="images_pull_direct">直接拉取</string>
+    <string name="images_tag_title">选择版本</string>
+    <string name="images_tag_loading">正在获取版本列表…</string>
+    <string name="images_tag_failed">获取版本失败：%1$s</string>
+    <string name="images_tag_empty">这个仓库没有对外暴露 tag。</string>
+    <string name="images_tag_filter">过滤版本</string>
+    <string name="images_tag_latest">最新</string>
+    <string name="images_tag_more">共 %2$d 个，仅显示前 %1$d 个 —— 用上方过滤缩小范围。</string>
+    <string name="images_official">官方</string>
 
     <!-- 资源 -->
     <string name="resources_title">资源</string>
@@ -302,6 +325,8 @@
     <string name="sec_startup">启动</string>
     <string name="setting_autostart">随开机自动启动 VM</string>
     <string name="setting_autostart_desc">开机后自动拉起容器引擎，方便其他 App 直接连 2375</string>
+    <string name="setting_amd64">amd64 (x86_64) 镜像支持</string>
+    <string name="setting_amd64_desc">默认关闭，仅支持 arm64。开启后经 qemu-x86_64 运行 amd64 镜像（额外占用内存/CPU；下次启动 VM 生效）</string>
 
     <string name="sec_appearance">外观</string>
     <string name="setting_mode">明暗模式</string>

@@ -18,6 +18,28 @@ object TarExtractor {
         }
     }
 
+    /**
+     * 把 tar 内的相对条目名解析为 destDir 下的安全路径，阻止路径穿越（Zip-Slip）。
+     *
+     * 拒绝：绝对路径、含 `..` 段、或规范化后不在 destDir 之内的条目。命中即抛
+     * 异常，避免恶意 tar 把文件写到 destDir 之外（详见 SECURITY-REVIEW M-2）。
+     * 返回的 File 已用 canonicalPath 校验过，可安全用于 write/mkdirs。
+     */
+    private fun safeResolve(destDir: File, entryName: String): File {
+        // 显式拒绝绝对路径（不同平台/实现的 File(parent, child) 行为不一致，必须前置拦截）。
+        if (entryName.startsWith("/") || entryName.startsWith("\\")) {
+            throw SecurityException("tar 条目为绝对路径（Zip-Slip）: $entryName")
+        }
+        val destRoot = destDir.canonicalFile
+        val out = File(destRoot, entryName)
+        val canonical = out.canonicalFile
+        val rootPrefix = destRoot.path + File.separator
+        if (canonical.path != destRoot.path && !canonical.path.startsWith(rootPrefix)) {
+            throw SecurityException("tar 条目越界（Zip-Slip）: $entryName")
+        }
+        return out
+    }
+
     private fun extractTarStream(input: InputStream, destDir: File) {
         val bin = BufferedInputStream(input)
         val header = ByteArray(512)
@@ -46,10 +68,10 @@ object TarExtractor {
                     skipPadding(bin, size)
                 }
                 '5' -> { // directory
-                    File(destDir, fullName).mkdirs()
+                    safeResolve(destDir, fullName).mkdirs()
                 }
                 '0', '\u0000', '7' -> { // file
-                    val out = File(destDir, fullName)
+                    val out = safeResolve(destDir, fullName)
                     out.parentFile?.mkdirs()
                     copyN(bin, out, size)
                     out.setExecutable(true)  // 都设可执行，简单可靠

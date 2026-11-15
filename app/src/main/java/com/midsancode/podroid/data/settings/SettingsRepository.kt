@@ -32,20 +32,39 @@ const val DEFAULT_MIRRORS = "docker.m.daocloud.io,docker.1panel.live,hub.rat.dev
  * 运行中修改不会热生效——UI 上必须明确告知，否则用户会以为改了没用。
  */
 data class Settings(
-    val ramMb: Int = 1024,
+    val ramMb: Int = 512,
     val diskMb: Int = 4096,
     val enginePort: Int = 2375,
     val dnsServers: String = DEFAULT_DNS,
     val autoStart: Boolean = false,
     /** docker.io 镜像站，逗号分隔；空串表示用 boot.sh 内置默认。 */
     val mirrors: String = "",
-    /** 容器默认网络模式：host / bridge。 */
+    /** 容器默认网络模式：host / bridge。默认 bridge，避免容器与 guest 宿主共享网络栈。 */
+    /** 容器默认网络模式：host / bridge。默认 host —— 内置内核未开启 bridge 支持（netavark 建桥会失败），
+     *  选 bridge 会导致容器无法启动。需要独立网络须先重编内核。 */
     val networkMode: String = "host",
+    /**
+     * 是否启用 amd64 (x86_64) 镜像支持。
+     *
+     * 默认关闭：只有在 guest 内注册 binfmt + qemu-x86_64 才能跑 amd64 镜像，而该
+     * 用户态转译会额外吃内存/CPU。默认只做 arm64，需要时用户显式开启（见
+     * `podroid.amd64` 内核 cmdline，docklet-boot 据此决定是否注册 binfmt）。
+     */
+    val amd64Support: Boolean = false,
     /** 主题强调色：blue / teal / purple / green / orange。 */
     val themeColor: String = "blue",
     /** 明暗模式：system / light / dark。 */
     val themeMode: String = "system",
-)
+) {
+    /**
+     * 生效的镜像站串（逗号分隔）：没填就用默认那三家的顺序。
+     *
+     * 做成成员属性而不是让调用方 import 顶层的 [DEFAULT_MIRRORS]：跨包引用顶层 const
+     * 在这个工程里踩过坑（RegistryClient 编译期报 Unresolved reference），
+     * 收进来既省一次 import，也让"空值回落"这条规则只有一处实现。
+     */
+    val effectiveMirrors: String get() = mirrors.ifBlank { DEFAULT_MIRRORS }
+}
 
 /**
  * 设置仓库：DataStore 持久 + StateFlow 同步内存视图（VM 启动时同步读取）。
@@ -61,6 +80,7 @@ class SettingsRepository(private val context: Context) {
     private val KEY_AUTO = booleanPreferencesKey("auto_start")
     private val KEY_MIRRORS = stringPreferencesKey("mirrors")
     private val KEY_NETMODE = stringPreferencesKey("network_mode")
+    private val KEY_AMD64 = booleanPreferencesKey("amd64_support")
     private val KEY_THEME = stringPreferencesKey("theme_color")
     private val KEY_MODE = stringPreferencesKey("theme_mode")
 
@@ -78,13 +98,14 @@ class SettingsRepository(private val context: Context) {
     suspend fun settingsOnce(): Settings = context.dataStore.data.first().toSettings()
 
     private fun androidx.datastore.preferences.core.Preferences.toSettings() = Settings(
-        ramMb = this[KEY_RAM] ?: 1024,
+        ramMb = this[KEY_RAM] ?: 512,
         diskMb = this[KEY_DISK] ?: 4096,
         enginePort = this[KEY_PORT] ?: 2375,
         dnsServers = this[KEY_DNS] ?: DEFAULT_DNS,
         autoStart = this[KEY_AUTO] ?: false,
         mirrors = this[KEY_MIRRORS] ?: "",
         networkMode = this[KEY_NETMODE] ?: "host",
+        amd64Support = this[KEY_AMD64] ?: false,
         themeColor = this[KEY_THEME] ?: "blue",
         themeMode = this[KEY_MODE] ?: "system",
     )
@@ -107,6 +128,8 @@ class SettingsRepository(private val context: Context) {
     suspend fun setMirrors(s: String) = commit { it[KEY_MIRRORS] = s.take(200) }
 
     suspend fun setNetworkMode(m: String) = commit { it[KEY_NETMODE] = if (m == "bridge") "bridge" else "host" }
+
+    suspend fun setAmd64Support(on: Boolean) = commit { it[KEY_AMD64] = on }
 
     suspend fun setThemeColor(key: String) = commit { it[KEY_THEME] = key }
 

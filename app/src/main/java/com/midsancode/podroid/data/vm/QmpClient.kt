@@ -49,7 +49,8 @@ class QmpClient(private val socketPath: String) {
         send(JSONObject().put("execute", "qmp_capabilities"))
         val args = JSONObject()
             .put("id", "net0")
-            .put("source", "$proto::${hostPort}-:${guestPort}")
+            // 安全：绑定 127.0.0.1，避免把转发暴露到所有网卡。
+            .put("source", "$proto:127.0.0.1:${hostPort}-:${guestPort}")
         val resp = send(JSONObject().put("execute", "hostfwd-add").put("arguments", args))
         resp != null && !resp.has("error")
     } catch (e: Exception) {
@@ -61,7 +62,8 @@ class QmpClient(private val socketPath: String) {
         send(JSONObject().put("execute", "qmp_capabilities"))
         val args = JSONObject()
             .put("id", "net0")
-            .put("source", "$proto::${hostPort}-:")
+            // 与 addHostfwd 保持一致：移除时也必须带上 127.0.0.1，否则匹配不到已建规则。
+            .put("source", "$proto:127.0.0.1:${hostPort}-:")
         val resp = send(JSONObject().put("execute", "hostfwd-remove").put("arguments", args))
         resp != null && !resp.has("error")
     } catch (e: Exception) {
